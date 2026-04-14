@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile data including currency and career progress.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "currency": { "type": "number" },
+        "careerLeague": { "type": "number" },
+        "friends": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "currency", "careerLeague"]
+    },
+    "Car": {
+      "title": "Car",
+      "description": "A car owned by a user.",
+      "type": "object",
+      "properties": {
+        "engine": { "type": "number" },
+        "engineName": { "type": "string" },
+        "engineDesc": { "type": "string" },
+        "tires": { "type": "number" },
+        "tiresName": { "type": "string" },
+        "tiresDesc": { "type": "string" },
+        "transmission": { "type": "number" },
+        "transmissionName": { "type": "string" },
+        "transmissionDesc": { "type": "string" },
+        "color": { "type": "string" },
+        "spoiler": { "type": "boolean" },
+        "imageUrl": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["engine", "tires", "transmission", "color", "spoiler"]
+    },
+    "Matchmaking": {
+      "title": "Matchmaking",
+      "description": "Lobby for finding opponents.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["waiting", "matched"] },
+        "player1": { "type": "string" },
+        "player2": { "type": "string" },
+        "raceId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["status", "player1"]
+    },
+    "Race": {
+      "title": "Race",
+      "description": "Active multiplayer race.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["countdown", "racing", "finished"] },
+        "player1": { "type": "string" },
+        "player2": { "type": "string" },
+        "player1Progress": { "type": "number" },
+        "player2Progress": { "type": "number" },
+        "winner": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["status", "player1", "player2", "player1Progress", "player2Progress"]
+    },
+    "LeaderboardRecord": {
+      "title": "LeaderboardRecord",
+      "description": "A record of a race time for a specific league.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "leagueId": { "type": "string" },
+        "timeMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "leagueId", "timeMs", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles."
+    },
+    "/cars/{userId}": {
+      "schema": { "$ref": "#/entities/Car" },
+      "description": "User's cars."
+    },
+    "/matchmaking/{matchId}": {
+      "schema": { "$ref": "#/entities/Matchmaking" },
+      "description": "Matchmaking queue."
+    },
+    "/races/{raceId}": {
+      "schema": { "$ref": "#/entities/Race" },
+      "description": "Active races."
+    },
+    "/leaderboards/{recordId}": {
+      "schema": { "$ref": "#/entities/LeaderboardRecord" },
+      "description": "Leaderboard records."
+    }
+  }
+}
