@@ -1,5 +1,5 @@
 {
   "name": "Neon Drag Racing",
   "description": "A cyberpunk drag racing game with AI-generated cars, music, and real-world drag strip discovery.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["camera"]
 }

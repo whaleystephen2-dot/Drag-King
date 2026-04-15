@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Newspaper, Search, Loader2, ExternalLink } from 'lucide-react';
+import { Newspaper, Search, Loader2, ExternalLink, Zap } from 'lucide-react';
 
 export default function News() {
   const [query, setQuery] = useState('Latest NHRA drag racing news and tips for beginners');
@@ -21,7 +21,7 @@ export default function News() {
       
       const ai = new GoogleGenAI({ apiKey });
       const res = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: query,
         config: {
           tools: [{ googleSearch: {} }]
@@ -50,61 +50,79 @@ export default function News() {
     }
   };
 
+  // Auto-fetch on load
+  useEffect(() => {
+    handleSearch();
+  }, []);
+
   return (
-    <div className="p-6 max-w-4xl mx-auto flex flex-col gap-8 h-full">
-      <div className="bg-[#111] p-8 rounded-2xl border border-[#333]">
-        <div className="flex items-center gap-3 mb-2">
-          <Newspaper className="w-6 h-6 text-[#FFFF00]" />
-          <h2 className="text-2xl font-bold uppercase tracking-widest">Racing News & Tips</h2>
+    <div className="p-6 max-w-5xl mx-auto flex flex-col gap-8 h-full overflow-y-auto">
+      <div className="bg-[#111] p-8 border-4 border-[#1a1a1a]">
+        <div className="flex items-center gap-4 mb-4">
+          <Newspaper className="w-10 h-10 text-[#00ffcc]" />
+          <h2 className="text-4xl font-black uppercase tracking-tighter italic -skew-x-[10deg]">Racing News & Intel</h2>
         </div>
-        <p className="text-gray-400 text-sm mb-6">Stay up to date with the latest drag racing news and pro tips.</p>
+        <p className="text-gray-400 font-mono text-sm mb-8 uppercase tracking-widest">Stay up to date with the latest drag racing news and pro tips.</p>
         
-        <div className="flex gap-4 mb-6">
+        <div className="flex gap-4 mb-2">
           <input 
             type="text" 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="flex-1 bg-[#1a1a1a] border border-[#333] rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#FFFF00] transition-colors"
+            className="flex-1 bg-[#1a1a1a] border-2 border-[#333] px-6 py-4 text-white font-mono focus:outline-none focus:border-[#00ffcc] transition-colors -skew-x-[5deg]"
             placeholder="Search for news or tips..."
           />
           <button 
             onClick={handleSearch}
             disabled={isSearching}
-            className="px-6 py-3 bg-[#FFFF00] text-black font-bold uppercase tracking-widest rounded-lg hover:bg-[#CCCC00] disabled:opacity-50 flex items-center gap-2 transition-colors"
+            className="px-8 py-4 bg-[#00ffcc] text-black font-black uppercase tracking-widest text-xl -skew-x-[10deg] hover:scale-105 disabled:opacity-50 flex items-center gap-2 transition-transform"
           >
-            {isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
+            {isSearching ? <Loader2 className="w-6 h-6 animate-spin" /> : <Search className="w-6 h-6" />}
             Search
           </button>
         </div>
 
         {error && (
-          <div className="p-4 bg-red-500/20 border border-red-500 text-red-400 rounded-lg mb-6">
-            {error}
+          <div className="mt-6 p-4 bg-red-500/20 border-l-4 border-red-500 text-red-400 -skew-x-[5deg]">
+            <div className="skew-x-[5deg] font-mono">{error}</div>
           </div>
         )}
       </div>
 
+      {isSearching && !response && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Loader2 className="w-16 h-16 text-[#00ffcc] animate-spin mb-6" />
+          <p className="text-2xl font-black uppercase tracking-widest text-[#00ffcc] animate-pulse -skew-x-[10deg]">FETCHING INTEL...</p>
+        </div>
+      )}
+
       {response && (
-        <div className="bg-[#111] p-8 rounded-2xl border border-[#333] flex-1 overflow-y-auto">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-4">Report</h3>
-          <div className="prose prose-invert max-w-none mb-8">
-            <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">{response}</p>
+        <div className="bg-[#111] p-8 border-4 border-[#1a1a1a] flex-1">
+          <div className="flex items-center gap-3 mb-6">
+            <Zap className="w-6 h-6 text-[#ff00ff]" />
+            <h3 className="text-xl font-black uppercase tracking-widest text-[#ff00ff] -skew-x-[10deg]">Analysis Report</h3>
+          </div>
+          
+          <div className="prose prose-invert max-w-none mb-12 font-mono text-gray-300 leading-relaxed">
+            <p className="whitespace-pre-wrap">{response}</p>
           </div>
 
           {links.length > 0 && (
             <>
-              <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-4">Sources</h3>
-              <div className="flex flex-col gap-2">
+              <h3 className="text-xl font-black uppercase tracking-widest text-[#00ffcc] mb-6 -skew-x-[10deg] border-b-2 border-[#333] pb-2">Verified Sources</h3>
+              <div className="grid gap-4 md:grid-cols-2">
                 {links.map((link, idx) => (
                   <a 
                     key={idx}
                     href={link.uri}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-3 bg-[#1a1a1a] border border-[#333] rounded-lg hover:border-[#FFFF00] transition-colors group"
+                    className="flex items-center gap-4 p-4 bg-[#1a1a1a] border-l-4 border-[#333] hover:border-[#00ffcc] transition-colors group -skew-x-[5deg]"
                   >
-                    <ExternalLink className="w-4 h-4 text-gray-500 group-hover:text-[#FFFF00] flex-shrink-0" />
-                    <span className="font-bold text-sm truncate text-gray-300 group-hover:text-white">{link.title}</span>
+                    <div className="skew-x-[5deg] flex items-center gap-4 w-full overflow-hidden">
+                      <ExternalLink className="w-5 h-5 text-gray-500 group-hover:text-[#00ffcc] flex-shrink-0" />
+                      <span className="font-bold text-sm truncate text-gray-300 group-hover:text-white uppercase tracking-wider">{link.title}</span>
+                    </div>
                   </a>
                 ))}
               </div>

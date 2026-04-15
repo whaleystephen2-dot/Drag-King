@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Image as ImageIcon, Video, Loader2, Car, Wrench, PaintBucket, Zap, Settings2 } from 'lucide-react';
+import { Image as ImageIcon, Video, Loader2, Car, Wrench, PaintBucket, Zap, Settings2, Camera, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 
 interface CarStats {
+  chassis: string;
+  bodyKit: string;
   engine: number;
   engineName?: string;
   engineDesc?: string;
@@ -30,6 +32,8 @@ export default function Garage() {
   const [base64Image, setBase64Image] = useState<string | null>(null);
   
   const [stats, setStats] = useState<CarStats>({
+    chassis: 'street-tuner',
+    bodyKit: 'stock',
     engine: 1,
     engineName: 'Stock Engine',
     engineDesc: 'Standard factory engine.',
@@ -48,6 +52,10 @@ export default function Garage() {
   const [selectedPartType, setSelectedPartType] = useState<'engine' | 'tires' | 'transmission'>('engine');
   const [isGeneratingPart, setIsGeneratingPart] = useState(false);
 
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   useEffect(() => {
     if (!user) return;
     const fetchCar = async () => {
@@ -56,6 +64,8 @@ export default function Garage() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setStats({
+          chassis: data.chassis || 'street-tuner',
+          bodyKit: data.bodyKit || 'stock',
           engine: data.engine || 1,
           engineName: data.engineName || 'Stock Engine',
           engineDesc: data.engineDesc || 'Standard factory engine.',
@@ -97,6 +107,17 @@ export default function Garage() {
     try {
       await updateProfile({ currency: currency - cost });
       await saveCar({ ...stats, color, spoiler });
+    } catch (e) {
+      console.error("Mod failed", e);
+    }
+  };
+
+  const handleStructuralMod = async (key: 'chassis' | 'bodyKit', value: string, cost: number) => {
+    if (currency < cost || isSaving) return;
+    
+    try {
+      await updateProfile({ currency: currency - cost });
+      await saveCar({ ...stats, [key]: value });
     } catch (e) {
       console.error("Mod failed", e);
     }
@@ -284,6 +305,66 @@ export default function Garage() {
     }
   };
 
+  const startCamera = async () => {
+    setIsCameraOpen(true);
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      setError("Could not access camera. Please ensure permissions are granted.");
+      setIsCameraOpen(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      const tracks = stream.getTracks();
+      tracks.forEach(track => track.stop());
+    }
+    setIsCameraOpen(false);
+  };
+
+  const takePhoto = async () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/png');
+        
+        setImageUrl(dataUrl);
+        setBase64Image(dataUrl.split(',')[1]);
+        setVideoUrl(null);
+        
+        if (user) {
+          await setDoc(doc(db, 'cars', user.uid), {
+            imageUrl: dataUrl,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+        
+        stopCamera();
+      }
+    }
+  };
+
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      if (isCameraOpen) {
+        stopCamera();
+      }
+    };
+  }, [isCameraOpen]);
+
   return (
     <div className="p-6 max-w-6xl mx-auto flex flex-col lg:flex-row gap-8 h-full overflow-y-auto">
       
@@ -359,9 +440,51 @@ export default function Garage() {
         </div>
 
         <div className="bg-[#111] p-6 rounded-2xl border-4 border-[#1a1a1a]">
-          <h2 className="text-2xl font-black uppercase tracking-tighter italic -skew-x-[10deg] mb-6 text-[#ff00ff]">Visuals</h2>
+          <h2 className="text-2xl font-black uppercase tracking-tighter italic -skew-x-[10deg] mb-6 text-[#ff00ff]">Visuals & Body</h2>
           
           <div className="space-y-6">
+            <div className="bg-[#1a1a1a] p-4 border border-[#333] -skew-x-[5deg]">
+              <div className="skew-x-[5deg]">
+                <div className="flex items-center gap-2 mb-4">
+                  <Car className="w-5 h-5 text-[#ff00ff]" />
+                  <span className="font-bold uppercase tracking-widest">Chassis ($5000)</span>
+                </div>
+                <div className="flex flex-col gap-2 mb-2">
+                  {['street-tuner', 'muscle-classic', 'cyber-supercar'].map(c => (
+                    <button 
+                      key={c}
+                      onClick={() => handleStructuralMod('chassis', c, 5000)}
+                      disabled={currency < 5000 || isSaving || stats.chassis === c}
+                      className={`px-4 py-2 text-left font-bold uppercase tracking-widest text-xs transition-colors border-l-4 ${stats.chassis === c ? 'bg-[#ff00ff]/20 border-[#ff00ff] text-white' : 'bg-[#222] border-[#333] text-gray-400 hover:bg-[#333]'}`}
+                    >
+                      {c.replace('-', ' ')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-[#1a1a1a] p-4 border border-[#333] -skew-x-[5deg]">
+              <div className="skew-x-[5deg]">
+                <div className="flex items-center gap-2 mb-4">
+                  <Wrench className="w-5 h-5 text-[#ff00ff]" />
+                  <span className="font-bold uppercase tracking-widest">Body Kit ($2500)</span>
+                </div>
+                <div className="flex flex-col gap-2 mb-2">
+                  {['stock', 'widebody', 'aero'].map(bk => (
+                    <button 
+                      key={bk}
+                      onClick={() => handleStructuralMod('bodyKit', bk, 2500)}
+                      disabled={currency < 2500 || isSaving || stats.bodyKit === bk}
+                      className={`px-4 py-2 text-left font-bold uppercase tracking-widest text-xs transition-colors border-l-4 ${stats.bodyKit === bk ? 'bg-[#ff00ff]/20 border-[#ff00ff] text-white' : 'bg-[#222] border-[#333] text-gray-400 hover:bg-[#333]'}`}
+                    >
+                      {bk}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="bg-[#1a1a1a] p-4 border border-[#333] -skew-x-[5deg]">
               <div className="skew-x-[5deg]">
                 <div className="flex items-center gap-2 mb-4">
@@ -422,6 +545,13 @@ export default function Garage() {
               {isGeneratingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImageIcon className="w-5 h-5" />}
               Generate (${IMAGE_GEN_COST})
             </button>
+            <button 
+              onClick={startCamera}
+              className="px-6 py-3 bg-[#ff00ff] text-white font-black uppercase tracking-widest rounded-lg hover:bg-[#cc00cc] flex items-center gap-2 -skew-x-[10deg]"
+            >
+              <Camera className="w-5 h-5" />
+              Photo
+            </button>
           </div>
 
           {error && (
@@ -432,38 +562,62 @@ export default function Garage() {
         </div>
 
         <div className="flex-1 bg-[#111] rounded-2xl border-4 border-[#1a1a1a] overflow-hidden relative flex items-center justify-center min-h-[400px]">
-          {!imageUrl && !isGeneratingImage && (
-            <div className="text-gray-600 flex flex-col items-center gap-4">
-              <Car className="w-24 h-24 opacity-50" />
-              <span className="uppercase tracking-widest text-sm font-bold">Your car will appear here</span>
-            </div>
-          )}
-
-          {isGeneratingImage && (
-            <div className="text-[#00ffcc] flex flex-col items-center gap-4">
-              <Loader2 className="w-16 h-16 animate-spin" />
-              <span className="uppercase tracking-widest text-sm font-bold animate-pulse">Designing vehicle...</span>
-            </div>
-          )}
-
-          {imageUrl && !videoUrl && !isGeneratingImage && (
-            <div className="relative w-full h-full">
-              <img src={imageUrl} alt="Generated Car" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              <div className="absolute bottom-6 right-6">
+          {isCameraOpen ? (
+            <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center">
+              <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+              <canvas ref={canvasRef} className="hidden" />
+              
+              <div className="absolute bottom-8 left-0 right-0 flex justify-center gap-8">
                 <button 
-                  onClick={handleGenerateVideo}
-                  disabled={isGeneratingVideo || currency < VIDEO_GEN_COST}
-                  className="px-6 py-4 bg-[#00ffcc] text-black font-black uppercase tracking-widest rounded-full shadow-[0_0_20px_rgba(0,255,204,0.4)] hover:scale-105 transition-transform disabled:opacity-50 flex items-center gap-2 -skew-x-[10deg]"
+                  onClick={stopCamera}
+                  className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center hover:bg-red-600 transition-colors"
                 >
-                  {isGeneratingVideo ? <Loader2 className="w-5 h-5 animate-spin" /> : <Video className="w-5 h-5" />}
-                  {isGeneratingVideo ? 'Animating...' : `Animate Car ($${VIDEO_GEN_COST})`}
+                  <X className="w-8 h-8 text-white" />
+                </button>
+                <button 
+                  onClick={takePhoto}
+                  className="w-16 h-16 rounded-full bg-white border-4 border-gray-300 flex items-center justify-center hover:bg-gray-200 transition-colors"
+                >
+                  <Camera className="w-8 h-8 text-black" />
                 </button>
               </div>
             </div>
-          )}
+          ) : (
+            <>
+              {!imageUrl && !isGeneratingImage && (
+                <div className="text-gray-600 flex flex-col items-center gap-4">
+                  <Car className="w-24 h-24 opacity-50" />
+                  <span className="uppercase tracking-widest text-sm font-bold">Your car will appear here</span>
+                </div>
+              )}
 
-          {videoUrl && (
-            <video src={videoUrl} autoPlay loop controls className="w-full h-full object-cover" />
+              {isGeneratingImage && (
+                <div className="text-[#00ffcc] flex flex-col items-center gap-4">
+                  <Loader2 className="w-16 h-16 animate-spin" />
+                  <span className="uppercase tracking-widest text-sm font-bold animate-pulse">Designing vehicle...</span>
+                </div>
+              )}
+
+              {imageUrl && !videoUrl && !isGeneratingImage && (
+                <div className="relative w-full h-full">
+                  <img src={imageUrl} alt="Generated Car" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <div className="absolute bottom-6 right-6">
+                    <button 
+                      onClick={handleGenerateVideo}
+                      disabled={isGeneratingVideo || currency < VIDEO_GEN_COST}
+                      className="px-6 py-4 bg-[#00ffcc] text-black font-black uppercase tracking-widest rounded-full shadow-[0_0_20px_rgba(0,255,204,0.4)] hover:scale-105 transition-transform disabled:opacity-50 flex items-center gap-2 -skew-x-[10deg]"
+                    >
+                      {isGeneratingVideo ? <Loader2 className="w-5 h-5 animate-spin" /> : <Video className="w-5 h-5" />}
+                      {isGeneratingVideo ? 'Animating...' : `Animate Car ($${VIDEO_GEN_COST})`}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {videoUrl && (
+                <video src={videoUrl} autoPlay loop controls className="w-full h-full object-cover" />
+              )}
+            </>
           )}
         </div>
       </div>

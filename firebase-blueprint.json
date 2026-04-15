@@ -19,6 +19,8 @@
       "description": "A car owned by a user.",
       "type": "object",
       "properties": {
+        "chassis": { "type": "string" },
+        "bodyKit": { "type": "string" },
         "engine": { "type": "number" },
         "engineName": { "type": "string" },
         "engineDesc": { "type": "string" },
@@ -33,7 +35,7 @@
         "imageUrl": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["engine", "tires", "transmission", "color", "spoiler"]
+      "required": ["chassis", "bodyKit", "engine", "tires", "transmission", "color", "spoiler"]
     },
     "Matchmaking": {
       "title": "Matchmaking",
@@ -75,6 +77,30 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "displayName", "leagueId", "timeMs", "createdAt"]
+    },
+    "AIBot": {
+      "title": "AIBot",
+      "description": "An AI opponent bot.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "difficulty": { "type": "number" },
+        "imageUrl": { "type": "string" },
+        "carStats": {
+          "type": "object",
+          "properties": {
+            "engine": { "type": "number" },
+            "tires": { "type": "number" },
+            "transmission": { "type": "number" },
+            "chassis": { "type": "string" },
+            "bodyKit": { "type": "string" },
+            "color": { "type": "string" },
+            "spoiler": { "type": "boolean" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "difficulty", "imageUrl", "carStats"]
     }
   },
   "firestore": {
@@ -97,6 +123,10 @@
     "/leaderboards/{recordId}": {
       "schema": { "$ref": "#/entities/LeaderboardRecord" },
       "description": "Leaderboard records."
+    },
+    "/ai_bots/{botId}": {
+      "schema": { "$ref": "#/entities/AIBot" },
+      "description": "AI opponent bots."
     }
   }
 }

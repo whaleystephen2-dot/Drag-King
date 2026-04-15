@@ -114,6 +114,7 @@ function MainApp() {
             <NavButton active={location.pathname === '/multiplayer'} onClick={() => navigate('/multiplayer')} icon={<Users className="w-4 h-4" />} label="Online" />
             <NavButton active={location.pathname === '/leaderboard'} onClick={() => navigate('/leaderboard')} icon={<Trophy className="w-4 h-4" />} label="Ranks" />
             <NavButton active={location.pathname === '/discover'} onClick={() => navigate('/discover')} icon={<Globe className="w-4 h-4" />} label="Discover" />
+            <NavButton active={location.pathname === '/news'} onClick={() => navigate('/news')} icon={<Newspaper className="w-4 h-4" />} label="News" />
             <NavButton active={location.pathname === '/race'} onClick={() => navigate('/race')} icon={<Flag className="w-4 h-4" />} label="Race" />
           </nav>
         </div>

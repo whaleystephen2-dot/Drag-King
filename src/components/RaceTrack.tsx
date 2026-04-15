@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Trophy, Loader2 } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +12,7 @@ export default function RaceTrack() {
   
   const leagueId = searchParams.get('league') || '0';
   const matchId = searchParams.get('id');
+  const botId = searchParams.get('botId');
   const trackName = searchParams.get('trackName');
   const trackLocation = searchParams.get('location');
   const isMultiplayer = !!matchId;
@@ -29,12 +30,30 @@ export default function RaceTrack() {
   const [playerRole, setPlayerRole] = useState<'player1' | 'player2' | null>(null);
   const [raceTimeMs, setRaceTimeMs] = useState<number | null>(null);
   
-  const [carStats, setCarStats] = useState({ engine: 1, tires: 1, transmission: 1, color: '#00ffcc', spoiler: false });
+  const [isBoosting, setIsBoosting] = useState(false);
+  const [n2oReady, setN2oReady] = useState(true);
+  const [n2oCooldownProgress, setN2oCooldownProgress] = useState(100);
+  const [damage, setDamage] = useState(0);
+  
+  const [carStats, setCarStats] = useState({ 
+    chassis: 'street-tuner',
+    bodyKit: 'stock',
+    engine: 1, 
+    tires: 1, 
+    transmission: 1, 
+    color: '#00ffcc', 
+    spoiler: false 
+  });
+
+  const [botStats, setBotStats] = useState<any>(null);
 
   const finishLine = 1000; // arbitrary units
   const requestRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number | null>(null);
   const raceStartTimeRef = useRef<number | null>(null);
+  const isBoostingRef = useRef(false);
+  const n2oEndTimeRef = useRef(0);
+  const n2oCooldownRef = useRef(0);
 
   // Audio Refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -100,6 +119,8 @@ export default function RaceTrack() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setCarStats({
+          chassis: data.chassis || 'street-tuner',
+          bodyKit: data.bodyKit || 'stock',
           engine: data.engine || 1,
           tires: data.tires || 1,
           transmission: data.transmission || 1,
@@ -110,6 +131,18 @@ export default function RaceTrack() {
     };
     fetchCar();
   }, [user]);
+
+  // Fetch Bot Stats
+  useEffect(() => {
+    if (!botId) return;
+    const fetchBot = async () => {
+      const docSnap = await getDoc(doc(db, 'ai_bots', botId));
+      if (docSnap.exists()) {
+        setBotStats(docSnap.data());
+      }
+    };
+    fetchBot();
+  }, [botId]);
 
   // Determine player role
   useEffect(() => {
@@ -234,6 +267,14 @@ export default function RaceTrack() {
     setRewardClaimed(false);
     setRaceTimeMs(null);
     raceStartTimeRef.current = null;
+    
+    setIsBoosting(false);
+    setN2oReady(true);
+    setN2oCooldownProgress(100);
+    setDamage(0);
+    isBoostingRef.current = false;
+    n2oEndTimeRef.current = 0;
+    n2oCooldownRef.current = 0;
   };
 
   useEffect(() => {
@@ -298,11 +339,41 @@ export default function RaceTrack() {
           setSpeed((s) => s + (gear * 2 + carStats.tires) * deltaTime);
         }
 
+        // Damage from redlining
+        if (status === 'racing' && newRpm > 8500) {
+          setDamage((prev) => Math.min(100, prev + 15 * deltaTime));
+        }
+
         return newRpm;
       });
 
-      // Apply drag
-      setSpeed((prevSpeed) => Math.max(0, prevSpeed - 5 * deltaTime));
+      // Apply drag (increases with damage)
+      setSpeed((prevSpeed) => {
+        const drag = 5 + ((damage / 100) * 15);
+        return Math.max(0, prevSpeed - drag * deltaTime);
+      });
+
+      // Handle N2O
+      if (isBoostingRef.current) {
+        if (time > n2oEndTimeRef.current) {
+          isBoostingRef.current = false;
+          setIsBoosting(false);
+          n2oCooldownRef.current = time + 5000; // 5 second cooldown
+          setN2oReady(false);
+          setN2oCooldownProgress(0);
+        } else {
+          // Apply boost
+          setSpeed((s) => s + 150 * deltaTime); // Huge acceleration
+          setN2oCooldownProgress(((n2oEndTimeRef.current - time) / 2000) * 100);
+        }
+      } else if (!n2oReady) {
+        if (time > n2oCooldownRef.current) {
+          setN2oReady(true);
+          setN2oCooldownProgress(100);
+        } else {
+          setN2oCooldownProgress(100 - ((n2oCooldownRef.current - time) / 5000) * 100);
+        }
+      }
 
       // Update distances
       setDistance((prev) => {
@@ -316,8 +387,12 @@ export default function RaceTrack() {
       // Opponent AI (steady acceleration) if not multiplayer
       if (!isMultiplayer) {
         setOpponentDistance((prev) => {
-          // Difficulty based on league
-          const difficultyMultiplier = leagueId ? parseInt(leagueId) : 1;
+          // Difficulty based on league or bot
+          let difficultyMultiplier = leagueId ? parseInt(leagueId) : 1;
+          if (botStats) {
+            difficultyMultiplier = botStats.difficulty;
+          }
+          
           const opponentSpeed = (40 + (time / 1000) * 5) * (1 + (difficultyMultiplier * 0.1));
           const newDist = prev + opponentSpeed * deltaTime;
           if (newDist >= finishLine && status !== 'finished' && distance < finishLine) {
@@ -405,7 +480,28 @@ export default function RaceTrack() {
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [status, isRevving, gear, speed, isMultiplayer, leagueId, distance, carStats]);
+  }, [status, isRevving, gear, speed, isMultiplayer, leagueId, distance, carStats, n2oReady, damage]);
+
+  const activateN2O = (e?: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
+    if (e) e.stopPropagation();
+    if (status !== 'racing') return;
+    if (isBoostingRef.current || !n2oReady) return;
+    
+    isBoostingRef.current = true;
+    setIsBoosting(true);
+    setN2oReady(false);
+    n2oEndTimeRef.current = performance.now() + 2000; // 2 seconds of boost
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'n' || e.key === ' ') {
+        activateN2O();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [status, n2oReady]);
 
   const playerProgress = Math.min(100, (distance / finishLine) * 100);
   const opponentProgress = Math.min(100, (opponentDistance / finishLine) * 100);
@@ -418,28 +514,113 @@ export default function RaceTrack() {
 
   return (
     <div className="relative w-full h-full bg-gradient-to-b from-[#111] to-[#050505] border-8 border-[#1a1a1a] overflow-hidden font-['Arial_Black','Helvetica_Bold',sans-serif] text-white">
+      <style>{`
+        @keyframes smoke-rise {
+          0% { transform: translate(0, 0) scale(1); opacity: 0.8; }
+          100% { transform: translate(-80px, -150px) scale(4); opacity: 0; }
+        }
+        .animate-smoke { animation: smoke-rise 1.5s infinite linear; }
+        .animate-smoke-delay-1 { animation: smoke-rise 1.5s infinite linear 0.5s; }
+        .animate-smoke-delay-2 { animation: smoke-rise 1.5s infinite linear 1.0s; }
+        
+        @keyframes flicker-neon {
+          0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% { opacity: 0.9; }
+          20%, 24%, 55% { opacity: 0.1; }
+        }
+        .animate-flicker { animation: flicker-neon 2s infinite; }
+        
+        @keyframes engine-sputter {
+          0%, 100% { transform: translateX(0) translateY(0); }
+          25% { transform: translateX(-2px) translateY(1px); }
+          50% { transform: translateX(2px) translateY(-1px); }
+          75% { transform: translateX(-1px) translateY(2px); }
+        }
+        .animate-sputter { animation: engine-sputter 0.1s infinite; }
+      `}</style>
       
       {/* Background Track Elements */}
       <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[1200px] h-[400px] bg-[#0f0f0f] border-t-2 border-[#333]" style={{ clipPath: 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)' }}>
         <div className="absolute left-1/2 top-0 w-1 h-full -translate-x-1/2 opacity-30" style={{ background: 'repeating-linear-gradient(to bottom, transparent, transparent 40px, #ffcc00 40px, #ffcc00 80px)' }}></div>
       </div>
+
+      {/* Nitrous Overlay */}
+      {isBoosting && (
+        <div className="absolute inset-0 pointer-events-none z-0 shadow-[inset_0_0_150px_rgba(0,255,204,0.3)]"></div>
+      )}
       
       {/* Car Positions */}
-      <div className="absolute bottom-[120px] right-[150px] w-[240px] h-[80px] rounded-t shadow-[0_10px_30px_rgba(0,0,0,0.8)] bg-gradient-to-l from-[#222] to-[#333] border-b-4 border-[#ff4444] opacity-80 transition-transform duration-100" style={{ transform: `scale(${1 + opponentProgress/200}) translateY(${-opponentProgress}px)` }}></div>
+      {botStats ? (
+        <div 
+          className={`absolute bottom-[120px] right-[150px] h-[80px] shadow-[0_10px_30px_rgba(0,0,0,0.8)] bg-gradient-to-l from-[#222] to-[#333] border-b-4 opacity-80 transition-transform duration-100 ${
+            botStats.carStats.chassis === 'muscle-classic' ? 'w-[260px] rounded-tr-sm rounded-tl-3xl' :
+            botStats.carStats.chassis === 'cyber-supercar' ? 'w-[280px] rounded-tr-[40px] rounded-tl-[80px] h-[60px]' :
+            'w-[240px] rounded-t'
+          } ${
+            botStats.carStats.bodyKit === 'widebody' ? 'border-l-8 border-r-8' :
+            botStats.carStats.bodyKit === 'aero' ? 'border-b-8 shadow-[0_20px_40px_rgba(0,0,0,0.9)]' : ''
+          }`}
+          style={{ 
+            transform: `scale(${1 + opponentProgress/200}) translateY(${-opponentProgress}px)`,
+            borderColor: botStats.carStats.color,
+            backgroundImage: `url(${botStats.imageUrl})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center'
+          }}
+        >
+          <div className="absolute inset-0 opacity-40 bg-gradient-to-t from-transparent to-current" style={{ color: botStats.carStats.color }}></div>
+          {botStats.carStats.spoiler && (
+            <div className="absolute -right-4 top-4 w-8 h-16 bg-[#111] border-l-2" style={{ borderColor: botStats.carStats.color, transform: 'skewX(20deg)' }}></div>
+          )}
+        </div>
+      ) : (
+        <div className="absolute bottom-[120px] right-[150px] w-[240px] h-[80px] rounded-t shadow-[0_10px_30px_rgba(0,0,0,0.8)] bg-gradient-to-l from-[#222] to-[#333] border-b-4 border-[#ff4444] opacity-80 transition-transform duration-100" style={{ transform: `scale(${1 + opponentProgress/200}) translateY(${-opponentProgress}px)` }}></div>
+      )}
       
       {/* Player Car */}
       <div 
-        className="absolute bottom-[120px] left-[150px] w-[240px] h-[80px] rounded-t shadow-[0_10px_30px_rgba(0,0,0,0.8)] bg-gradient-to-r from-[#222] to-[#444] border-b-4 transition-transform duration-100" 
+        className={`absolute bottom-[120px] left-[150px] h-[80px] shadow-[0_10px_30px_rgba(0,0,0,0.8)] bg-gradient-to-r from-[#222] to-[#444] border-b-4 transition-transform duration-100 ${
+          carStats.chassis === 'muscle-classic' ? 'w-[260px] rounded-tl-sm rounded-tr-3xl' :
+          carStats.chassis === 'cyber-supercar' ? 'w-[280px] rounded-tl-[40px] rounded-tr-[80px] h-[60px]' :
+          'w-[240px] rounded-t'
+        } ${
+          carStats.bodyKit === 'widebody' ? 'border-l-8 border-r-8' :
+          carStats.bodyKit === 'aero' ? 'border-b-8 shadow-[0_20px_40px_rgba(0,0,0,0.9)]' : ''
+        } ${damage > 75 ? 'animate-sputter' : ''}`}
         style={{ 
           transform: `scale(${1 + playerProgress/200}) translateY(${-playerProgress}px)`,
           borderColor: carStats.color
         }}
       >
         {/* Paint Job Accent */}
-        <div className="absolute inset-0 opacity-20 bg-gradient-to-t from-transparent to-current" style={{ color: carStats.color }}></div>
+        <div className={`absolute inset-0 opacity-20 bg-gradient-to-t from-transparent to-current ${damage > 50 ? 'animate-flicker' : ''}`} style={{ color: carStats.color }}></div>
+        
+        {/* Damage Dents */}
+        {damage > 25 && (
+          <div className="absolute top-2 left-[20%] w-12 h-8 bg-black/50 rounded-full blur-[2px] mix-blend-overlay"></div>
+        )}
+        {damage > 60 && (
+          <div className="absolute top-6 left-[60%] w-16 h-10 bg-black/70 rounded-full blur-[3px] mix-blend-overlay -skew-x-12"></div>
+        )}
+
+        {/* Engine Smoke */}
+        {damage > 25 && (
+          <div className="absolute top-0 left-[80%] z-50 pointer-events-none">
+            <div className={`absolute w-6 h-6 rounded-full blur-md animate-smoke ${damage > 75 ? 'bg-gray-900' : 'bg-gray-500'}`}></div>
+            {damage > 50 && <div className={`absolute w-8 h-8 rounded-full blur-md animate-smoke-delay-1 ${damage > 75 ? 'bg-gray-900' : 'bg-gray-500'}`}></div>}
+            {damage > 75 && <div className={`absolute w-10 h-10 rounded-full blur-md animate-smoke-delay-2 bg-black`}></div>}
+          </div>
+        )}
+
         {/* Spoiler */}
         {carStats.spoiler && (
           <div className="absolute -left-4 top-4 w-8 h-16 bg-[#111] border-r-2" style={{ borderColor: carStats.color, transform: 'skewX(-20deg)' }}></div>
+        )}
+        {/* Nitrous Flames */}
+        {isBoosting && (
+          <div className="absolute -left-16 top-1/2 -translate-y-1/2 flex gap-1">
+            <div className="w-12 h-4 bg-[#00ffcc] rounded-full animate-pulse blur-sm" style={{ transform: 'skewX(-20deg)' }}></div>
+            <div className="w-8 h-3 bg-white rounded-full animate-pulse blur-sm" style={{ transform: 'skewX(-20deg)' }}></div>
+          </div>
         )}
       </div>
 
@@ -465,7 +646,7 @@ export default function RaceTrack() {
         <div className="text-right font-mono tracking-[2px]">
           <div className="text-[12px] text-[#666] uppercase">DISTANCE</div>
           <div className="text-[24px] text-white mb-[10px]">{Math.floor(distance)}m</div>
-          <div className="text-[12px] text-[#666] uppercase">RIVAL</div>
+          <div className="text-[12px] text-[#666] uppercase">{botStats ? botStats.name : 'RIVAL'}</div>
           <div className="text-[24px] text-white mb-[10px]">{Math.floor(opponentDistance)}m</div>
         </div>
       </div>
@@ -511,6 +692,20 @@ export default function RaceTrack() {
           ></div>
         </div>
         <div className="text-[12px] text-[#666] uppercase mt-[5px] font-mono">{Math.floor(rpm)} RPM</div>
+
+        {/* Damage Bar */}
+        <div className="w-[200px] h-[8px] bg-[#1a1a1a] mt-[15px] relative overflow-hidden">
+          <div 
+            className="h-full transition-all duration-300" 
+            style={{ 
+              width: `${damage}%`,
+              background: damage > 75 ? '#ff4444' : damage > 50 ? '#ffcc00' : '#00ffcc'
+            }}
+          ></div>
+        </div>
+        <div className={`text-[12px] uppercase mt-[5px] font-mono ${damage > 75 ? 'text-[#ff4444] animate-pulse' : 'text-[#666]'}`}>
+          DAMAGE {Math.floor(damage)}%
+        </div>
       </div>
 
       {/* Overlays */}
@@ -570,6 +765,25 @@ export default function RaceTrack() {
           disabled={status !== 'racing'}
           className="flex-1 outline-none cursor-pointer disabled:cursor-default"
         />
+      </div>
+
+      {/* N2O Button */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
+        <button 
+          onPointerDown={activateN2O}
+          disabled={!n2oReady || status !== 'racing'}
+          className={`relative overflow-hidden px-8 py-4 font-black uppercase tracking-widest rounded-full -skew-x-[10deg] transition-all border-4 ${
+            isBoosting ? 'bg-[#00ffcc] text-black border-white shadow-[0_0_30px_rgba(0,255,204,0.8)] scale-110' :
+            !n2oReady ? 'bg-[#333] text-gray-500 border-[#555]' :
+            'bg-[#ff00ff] text-white border-[#ff00ff] hover:bg-[#cc00cc] hover:scale-105 shadow-[0_0_15px_rgba(255,0,255,0.4)]'
+          }`}
+        >
+          <div 
+            className="absolute bottom-0 left-0 h-1 bg-white transition-all duration-75"
+            style={{ width: `${n2oCooldownProgress}%`, opacity: isBoosting ? 1 : 0.5 }}
+          ></div>
+          <span className="relative z-10">{isBoosting ? 'BOOSTING!' : !n2oReady ? 'COOLDOWN' : 'NITROUS (N)'}</span>
+        </button>
       </div>
       
       {/* Control Hints */}
